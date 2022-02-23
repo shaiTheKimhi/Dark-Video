@@ -19,8 +19,9 @@ GT_STD =  [tensor(0.0697), tensor(0.1044), tensor(0.0477), tensor(0.1044)]
 
 
 def pack_raw(raw):
-    # pack Bayer image to 4 channels
+    # pack Bayer image to 3 channels
     #im = raw.raw_image_visible.astype(np.float32)
+    #CHANGES NOT TESTED
     im = raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True, output_bps=16)
     im = np.maximum(im - 512, 0) / (16383 - 512)  # subtract the black level
     return im
@@ -100,7 +101,7 @@ def create_dataset(dir_path = "../Sony", train_ratio = 0.5):
 
 
 class VideDataset(torch.utils.data.Dataset):
-    def __init__(self, dir_path = "../Sony", ids = [], crop_size=512, downsampling_ratio=1):
+    def __init__(self, dir_path = "../Sony", ids = [], crop_size=512, downsampling_ratio=4):
         super().__init__()
         self.ids = ids
 
@@ -146,7 +147,7 @@ class VideDataset(torch.utils.data.Dataset):
 
             images.append(torch.from_numpy(np.expand_dims(pack_raw(raw), axis=0)).permute(-1, 1, 2, 0).reshape(gtimage.shape)*ratio)
             
-            images[i] = images[i].permute(1,2,0)[::self.a, ::self.a].permute(2,0,1) #this line performs down-sampling by a ratio
+            images[i] = images[i].permute(1,2,0)[::self.a, ::self.a].permute(2,0,1) #this line performs down-sampling by a ratio (NOT TESTED)
 
         #Normalization preprocessing
         t1 = torchvision.transforms.Normalize(IM_MEAN, IM_STD) 
