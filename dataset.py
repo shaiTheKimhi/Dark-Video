@@ -1,3 +1,4 @@
+from turtle import down
 import cv2
 import torch
 import os
@@ -99,10 +100,13 @@ def create_dataset(dir_path = "../Sony", train_ratio = 0.5):
 
 
 class VideDataset(torch.utils.data.Dataset):
-    def __init__(self, dir_path = "../Sony", ids = []):
+    def __init__(self, dir_path = "../Sony", ids = [], crop_size=512, downsampling_ratio=1):
         super().__init__()
         self.ids = ids
-        
+
+        self.crop_size = crop_size
+        self.a = downsampling_ratio
+
         self.dir_path = dir_path
         self.gt_files = os.listdir(os.path.join(dir_path, "long/"))
         self.short_files = os.listdir(os.path.join(dir_path, "short/"))
@@ -141,11 +145,13 @@ class VideDataset(torch.utils.data.Dataset):
             ratio = min(gt_exposure / im_exposure, 300)
 
             images.append(torch.from_numpy(np.expand_dims(pack_raw(raw), axis=0)).permute(-1, 1, 2, 0).reshape(gtimage.shape)*ratio)
+            
+            images[i] = images[i].permute(1,2,0)[::self.a, ::self.a].permute(2,0,1) #this line performs down-sampling by a ratio
 
         #Normalization preprocessing
         t1 = torchvision.transforms.Normalize(IM_MEAN, IM_STD) 
         t2 = torchvision.transforms.Normalize(GT_MEAN, GT_STD) 
-        crop = torchvision.transforms.RandomCrop(512) #size is changeable
+        crop = torchvision.transforms.RandomCrop(self.crop_size) #size is changeable we can downsample the image to reduce image size
         t1 = torchvision.transforms.Compose([t1, crop])
         t2 = torchvision.transforms.Compose([t2, crop])
 
