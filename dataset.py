@@ -19,19 +19,23 @@ GT_STD =  [tensor(0.0697), tensor(0.1044), tensor(0.0477), tensor(0.1044)]
 
 def pack_raw(raw):
     # pack Bayer image to 4 channels
-    im = raw.raw_image_visible.astype(np.float32)
+    #im = raw.raw_image_visible.astype(np.float32)
+    im = raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True, output_bps=16)
     im = np.maximum(im - 512, 0) / (16383 - 512)  # subtract the black level
+    return im
 
-    im = np.expand_dims(im, axis=2)
-    img_shape = im.shape
-    H = img_shape[0]
-    W = img_shape[1]
+    #im = np.expand_dims(im, axis=2)
+    #img_shape = im.shape
+    #H = img_shape[0]
+    #W = img_shape[1]
 
-    out = np.concatenate((im[0:H:2, 0:W:2, :],
-                          im[0:H:2, 1:W:2, :],
-                          im[1:H:2, 1:W:2, :],
-                          im[1:H:2, 0:W:2, :]), axis=2)
-    return out
+    #out = np.concatenate((im[0:H:2, 0:W:2, :],
+    #                      im[0:H:2, 1:W:2, :],
+    #                      im[1:H:2, 1:W:2, :],
+    #                      im[1:H:2, 0:W:2, :]), axis=2)
+
+
+    #return out
 
 
 
@@ -145,7 +149,7 @@ class VideDataset(torch.utils.data.Dataset):
         t1 = torchvision.transforms.Compose([t1, crop])
         t2 = torchvision.transforms.Compose([t2, crop])
 
-        return t1(images[0])[:-1, :, :], t1(images[1])[:-1, :, :], t2(gtimage)[:-1, :, :]
+        return t1(images[0]), t1(images[1]), t2(gtimage)
 
     def __len__(self):
         return len(self.ids)
