@@ -3,14 +3,19 @@ import torch.nn as nn
 from model import *
 from tqdm import tqdm
 from dataset import *
+from JSON import dumps
+import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def train_eval(vgg, unet):
+def train_eval(vgg, unet, loss_f=F_loss):
     epochs = 100
     lr = 3e-4
     wd = 1e-4
     bs = 2 #batch size
+
+    train_logs = []
+    val_logs = []
 
     ratio = 0.7
 
@@ -20,14 +25,14 @@ def train_eval(vgg, unet):
 
     optimizer = torch.optim.Adam(unet.parameters(), lr=lr, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs, eta_min=0, verbose=True)
-    loss_f = F_loss
     min_loss = float('inf')
 
 
     for epoch in range(epochs):
-        train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs)
+        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs))
 
         #loss = valid_epoch(model, test_dl, loss_f, epoch, epochs, None)
+        val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
 
         scheduler.step()
         
@@ -39,6 +44,8 @@ def train_eval(vgg, unet):
                     'optimizer_state_dict': optimizer.state_dict(),
                     }, './checkpoint.pt')
             min_loss = loss
+
+    return train_logs, val_logs
             
 
 
@@ -52,12 +59,14 @@ def valid_epoch(vgg, unet, train_dl, loss_func, epoch, epochs, optimizer):
     bar = tqdm.tqdm(train_dl)
     for x1, x2, gt in bar:
         torch.cuda.empty_cache()
-        model.train()
+        unet.train()
         x1, gt = x1.to(device), gt.to(device)
         n = x1.shape[0]
         total_samples += n
 
-        total_loss += optimize(model, x1, gt, optimizer, loss_func)
+        y1 = unet(x1)
+        total_loss += optimize(vgg, y1, gt, optimizer, loss_func)
+        # Add evaluation for PSNR and FSNR and return these values
        
         bar.set_description(f'Validation:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
     
@@ -119,11 +128,106 @@ def optimize(model, im1, im2, optimizer, loss_func):
     return loss
 
 
+def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epochs, m):
+    total_loss = 0
+    total_samples = 0
+    bar = tqdm.tqdm(train_dl)
+    for x1, x2, gt in bar:
+        torch.cuda.empty_cache()
+        unet.train()
+        optimizer.zero_grad()
+        x1, x2, gt = x1.to(device), x2.to(device), gt.to(device)
+        n = x1.shape[0]
+        total_samples += n
 
+        y1 = unet(x1)
+        y2 = unet_m(x2)
+
+        t1 = vgg(y1)
+        t2 = vgg(y2)
+        t3 = vgg(gt)
+        loss = loss_func(t1, t3) + loss_func(t2, t3) + loss_func(t1, t2)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss
+
+        #update momentum model params
+        enc_params = zip(unet.parameters(), unet_m.parameters())
+        for q_parameters, k_parameters in enc_params:
+            k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
+       
+
+        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+    
+
+def momentum_train(vgg, unet):
+    epochs = 100
+    lr = 3e-4
+    wd = 1e-4
+    bs = 2 #batch size
+    momentum = 0.999
+    import copy
+    momentum_encoder = copy.deepcopy(unet).to(device)
+    for params in momentum_encoder.features.parameters(): #Momentum model does not require gradient
+        params.requires_grad = False
+
+    ratio = 0.7
+
+    train_ds, test_ds = create_dataset(train_ratio=ratio) #path is already default
+    train_dl = torch.utils.data.DataLoader(train_ds,batch_size=bs, shuffle=True)
+    test_dl = torch.utils.data.DataLoader(test_ds,batch_size=1, shuffle=True)
+
+    optimizer = torch.optim.Adam(unet.parameters(), lr=lr, weight_decay=wd)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs, eta_min=0, verbose=True)
+    loss_f = F_loss
+    min_loss = float('inf')
+
+
+    train_logs = []
+    val_logs = []
+
+    for epoch in range(epochs):
+        train_epoch_m(vgg, unet, momentum_encoder, train_dl, optimizer, loss_f, epoch, epochs, momentum)
+
+        #val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+
+        scheduler.step()
+        
+        loss = min_loss #TODO: remove this line
+        if (loss <= min_loss):
+            torch.save({
+                    'validation_loss' : loss,
+                    'model_state_dict': unet.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    }, './checkpoint.pt')
+            min_loss = loss
+
+    return train_logs, val_logs
 
 if __name__ == "__main__":
-    torch.autograd.set_detect_anomaly(True)
+    serial = str(len(os.listdir("./logs")))
+
+
+    #torch.autograd.set_detect_anomaly(True)
     print(device)
     vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
-    train_eval(vgg, unet)
+    logs = train_eval(vgg, unet)
+
+    file = open(f"logs/reg{serial}.txt","w")
+    file.write(dumps(logs))
+    file.close()
+
+
+    #train with momentum method (add logs save)
+    logs = momentum_train(vgg, unet)
+
+    #train without special loss (add logs save)
+    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+
+    #train with transfer learning from COCO (add logs save)
+    fcn_net = fcn_resent50()
+    logs = train_eval(vgg, fcn_net)
+
+

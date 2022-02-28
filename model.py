@@ -22,6 +22,7 @@ class Vgg19(nn.Module):
         #self.blocks = [block1, block2, block3, block4]
 
     def forward(self, x):
+        #x = x.float()
         blocks = [self.block1, self.block2, self.block3, self.block4]
         res =  []
         for b in blocks:
@@ -85,6 +86,7 @@ class ResUnet(nn.Module):
         self.block10 = nn.Conv2d(dims, 3, 1, stride=1, padding=0)
 
     def forward(self, x):
+        #x = x.float()
         x1 = self.block1(x)
         x2 = self.block2(x1)
         x3 = self.block3(x2)
@@ -111,3 +113,16 @@ class ResUnet(nn.Module):
         return x10
 
 
+def fcn_resent50(pre_trained=True, num_no_grad = 4):
+    '''
+    Returns a model of FCN resnet 50 (optionally pretrained on COCO)
+    num_no_grad: number of blocks that for which gradient is turned off
+    '''
+    model = torchvision.models.segmentation.fcn_resnet50(pretrained=pre_trained)
+    layers = list(model.backbone) # total number of layers is 8
+    #turn off gradient for several first layers
+    for layer in layers:
+        for param in layer.paramters():
+            param.require_grad = False
+
+    return model

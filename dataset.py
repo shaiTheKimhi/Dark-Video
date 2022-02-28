@@ -1,4 +1,4 @@
-from turtle import down
+
 import cv2
 import torch
 import os
@@ -12,19 +12,28 @@ import tqdm
 
 from torch import tensor
 
-IM_MEAN = [tensor(0.1009), tensor(0.1462), tensor(0.0698), tensor(0.1462)]
-IM_STD = [tensor(1.0786), tensor(1.3015), tensor(0.9083), tensor(1.3028)]
-GT_MEAN = [tensor(0.0559), tensor(0.0937), tensor(0.0327), tensor(0.0937)]
-GT_STD =  [tensor(0.0697), tensor(0.1044), tensor(0.0477), tensor(0.1044)]
+# # IM_MEAN = [tensor(0.1009), tensor(0.1462), tensor(0.0698), tensor(0.1462)]
+# # IM_STD = [tensor(1.0786), tensor(1.3015), tensor(0.9083), tensor(1.3028)]
+# # GT_MEAN = [tensor(0.0559), tensor(0.0937), tensor(0.0327), tensor(0.0937)]
+# # GT_STD =  [tensor(0.0697), tensor(0.1044), tensor(0.0477), tensor(0.1044)]
 
 
-def pack_raw(raw):
+IM_MEAN = [tensor(60813.8086), tensor(33624.9570), tensor(42619.4141)]
+IM_STD = [tensor(123125.8125), tensor(79774.9375), tensor(72256.8828)]
+GT_MEAN = [tensor(1.2707), tensor(1.0362), tensor(0.9850)]
+GT_STD =  [tensor(0.8245), tensor(0.7085), tensor(0.8528)]
+
+
+def pack_raw(raw, gt=True):
     # pack Bayer image to 3 channels
     #im = raw.raw_image_visible.astype(np.float32)
     #CHANGES NOT TESTED
     im = raw.postprocess(use_camera_wb=True, half_size=False, no_auto_bright=True, output_bps=16)
-    im = np.maximum(im - 512, 0) / (16383 - 512)  # subtract the black level
-    return im
+    if gt:
+        im = np.maximum(im - 512, 0) / (16383 - 512)  # subtract the black level
+    else:
+        im = im.astype(np.int16)
+    return torch.tensor(im)
 
     #im = np.expand_dims(im, axis=2)
     #img_shape = im.shape
@@ -41,7 +50,7 @@ def pack_raw(raw):
 
 
 
-NUM_CHANNELS = 4
+NUM_CHANNELS = 3
 '''
 Get the statistics of GT images and of low exposure images and use these for dataset normalization
 '''
@@ -64,6 +73,7 @@ def get_statistics(dir_path = "../Sony"):
     for i in tqdm.tqdm(range(len(dataset))):
         #TODO: add statistics calculations here
         x1, x2, y = dataset[i]
+        x1, x2, y = x1.float(), x2.float(), y.float()
 
         m = torch.tensor([torch.mean(x1[j]) for j in range(NUM_CHANNELS)])/2
         std = torch.tensor([torch.std(x1[j]) for j in range(NUM_CHANNELS)])/2
@@ -128,7 +138,11 @@ class VideDataset(torch.utils.data.Dataset):
 
         gtimage = torch.from_numpy(np.expand_dims(pack_raw(raw), axis=0)).permute(-1, 1, 2, 0)
         gtimage = gtimage.reshape(gtimage.shape[:-1])
+        gtshape = gtimage.shape
+        gtimage = gtimage.permute(1,2,0)[::self.a, ::self.a].permute(2,0,1) #this line performs down-sampling by a ratio (NOT TESTED)
+        
         gt_exposure = float(names[0][9:-5])
+        gtimage = gtimage.float()
         
         #load
 
@@ -145,18 +159,24 @@ class VideDataset(torch.utils.data.Dataset):
             im_exposure = float(frames[i][9:-5])
             ratio = min(gt_exposure / im_exposure, 300)
 
-            images.append(torch.from_numpy(np.expand_dims(pack_raw(raw), axis=0)).permute(-1, 1, 2, 0).reshape(gtimage.shape)*ratio)
+            images.append(torch.from_numpy(np.expand_dims(pack_raw(raw, gt=False), axis=0)).permute(-1, 1, 2, 0).reshape(gtshape)*ratio)
             
             images[i] = images[i].permute(1,2,0)[::self.a, ::self.a].permute(2,0,1) #this line performs down-sampling by a ratio (NOT TESTED)
+            images[i] = images[i].float()
+
+        #return images[0], images[1], gtimage
+        
+        crop = torchvision.transforms.RandomCrop(self.crop_size) #size is changeable we can downsample the image to reduce image size
+        #return crop(images[0]), crop(images[1]), crop(gtimage)
 
         #Normalization preprocessing
         t1 = torchvision.transforms.Normalize(IM_MEAN, IM_STD) 
         t2 = torchvision.transforms.Normalize(GT_MEAN, GT_STD) 
-        crop = torchvision.transforms.RandomCrop(self.crop_size) #size is changeable we can downsample the image to reduce image size
+        
         t1 = torchvision.transforms.Compose([t1, crop])
         t2 = torchvision.transforms.Compose([t2, crop])
 
-        return t1(images[0]), t1(images[1]), t2(gtimage)
+        return t1(images[0]), t1(images[1]), t2(gtimage) #if deciding to return 4 channels image, than has to change architecture of UNET
 
     def __len__(self):
         return len(self.ids)
