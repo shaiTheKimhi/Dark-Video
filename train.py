@@ -3,7 +3,7 @@ import torch.nn as nn
 from model import *
 from tqdm import tqdm
 from dataset import *
-from JSON import dumps
+from json import dumps
 import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -169,7 +169,7 @@ def momentum_train(vgg, unet):
     momentum = 0.999
     import copy
     momentum_encoder = copy.deepcopy(unet).to(device)
-    for params in momentum_encoder.features.parameters(): #Momentum model does not require gradient
+    for params in momentum_encoder.parameters(): #Momentum model does not require gradient
         params.requires_grad = False
 
     ratio = 0.7
@@ -215,19 +215,19 @@ if __name__ == "__main__":
     unet =  ResUnet().to(device)
     logs = train_eval(vgg, unet)
 
-    file = open(f"logs/reg{serial}.txt","w")
-    file.write(dumps(logs))
-    file.close()
+    #file = open(f"logs/reg{serial}.txt","w")
+    #file.write(dumps(logs))
+    #file.close()
 
 
     #train with momentum method (add logs save)
-    logs = momentum_train(vgg, unet)
+    #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
-    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+    #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
-    fcn_net = fcn_resent50()
-    logs = train_eval(vgg, fcn_net)
+    #fcn_net = fcn_resent50()
+    #logs = train_eval(vgg, fcn_net)
 
 
