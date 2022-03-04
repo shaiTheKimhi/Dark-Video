@@ -80,7 +80,7 @@ def eval(model, im1, im2,  loss_func):
     loss = loss_func(res1, res2)
     return loss
 
-def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs):
+def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam=0.05):
     total_loss = 0
     total_samples = 0
     bar = tqdm.tqdm(train_dl)
@@ -98,7 +98,7 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs):
         t1 = vgg(y1)
         t2 = vgg(y2)
         t3 = vgg(gt)
-        loss = loss_func(t1, t3) + loss_func(t2, t3) + loss_func(t1, t2)
+        loss = loss_func(t1, t3) + loss_func(t2, t3) + lam * loss_func(t1, t2)
         loss.backward()
         optimizer.step()
 
