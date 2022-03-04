@@ -10,7 +10,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train_eval(vgg, unet, loss_f=F_loss):
     epochs = 100
-    lr = 3e-4
+    lr = 1e-3
     wd = 1e-4
     bs = 2 #batch size
 
@@ -36,8 +36,9 @@ def train_eval(vgg, unet, loss_f=F_loss):
 
         scheduler.step()
         
-        loss = min_loss #TODO: remove this line
-        if (loss <= min_loss):
+        #loss = min_loss #TODO: remove this line
+        loss = val_logs[-1]
+        if (loss >= min_loss):
             torch.save({
                     'validation_loss' : loss,
                     'model_state_dict': unet.state_dict(),
@@ -55,6 +56,7 @@ Returns the validation loss for each epoch (no accuracy measure, but can add PSN
 '''
 def valid_epoch(vgg, unet, train_dl, loss_func, epoch, epochs, optimizer):
     total_loss = 0
+    total_psnr = 0
     total_samples = 0
     bar = tqdm.tqdm(train_dl)
     for x1, x2, gt in bar:
@@ -66,11 +68,12 @@ def valid_epoch(vgg, unet, train_dl, loss_func, epoch, epochs, optimizer):
 
         y1 = unet(x1)
         total_loss += optimize(vgg, y1, gt, optimizer, loss_func)
+        total_psnr += psnr(y1, gt)
         # Add evaluation for PSNR and FSNR and return these values
        
-        bar.set_description(f'Validation:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+        bar.set_description(f'Validation:[{epoch+1}/{epochs}] psnr:{total_psnr/ total_samples}', refresh=True) 
     
-    return total_loss
+    return total_psnr
 
 def eval(model, im1, im2,  loss_func):
     res1 = model(im1)
@@ -78,7 +81,7 @@ def eval(model, im1, im2,  loss_func):
     loss = loss_func(res1, res2)
     return loss
 
-def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs):
+def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam=0.05):
     total_loss = 0
     total_samples = 0
     bar = tqdm.tqdm(train_dl)
@@ -96,7 +99,7 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs):
         t1 = vgg(y1)
         t2 = vgg(y2)
         t3 = vgg(gt)
-        loss = loss_func(t1, t3) + loss_func(t2, t3) + loss_func(t1, t2)
+        loss = loss_func(t1, t3) + loss_func(t2, t3) + lam * loss_func(t1, t2)
         loss.backward()
         optimizer.step()
 
@@ -114,6 +117,12 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs):
         #total_loss += loss
 
         bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+
+def psnr(im1, im2):
+    #return torch.mean((im1 - im2) ** 2)
+    if (torch.mean((im1 - im2) ** 2) < 1e-3): 
+        return 1000
+    return 20 * torch.log10(im1.max() / (torch.sqrt(torch.mean((im1 - im2) ** 2))))
 
 
 def optimize(model, im1, im2, optimizer, loss_func):
@@ -152,18 +161,20 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
 
         total_loss += loss
 
-        #update momentum model params
-        enc_params = zip(unet.parameters(), unet_m.parameters())
-        for q_parameters, k_parameters in enc_params:
-            k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
+        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+
+    #update momentum model params
+    enc_params = zip(unet.parameters(), unet_m.parameters())
+    for q_parameters, k_parameters in enc_params:
+        k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
        
 
-        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+        
     
 
 def momentum_train(vgg, unet):
     epochs = 100
-    lr = 3e-4
+    lr = 3e-3
     wd = 1e-4
     bs = 2 #batch size
     momentum = 0.999
@@ -209,25 +220,24 @@ if __name__ == "__main__":
     serial = str(len(os.listdir("./logs")))
 
 
-    #torch.autograd.set_detect_anomaly(True)
+    
     print(device)
     vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
-    logs = train_eval(vgg, unet)
-
-    #file = open(f"logs/reg{serial}.txt","w")
-    #file.write(dumps(logs))
-    #file.close()
-
+    #logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
     #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
-    #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
     #fcn_net = fcn_resent50()
     #logs = train_eval(vgg, fcn_net)
+
+    file = open(f"logs/reg{serial}.txt","w")
+    file.write(dumps(logs))
+    file.close()
 
 
