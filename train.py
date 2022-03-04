@@ -36,8 +36,9 @@ def train_eval(vgg, unet, loss_f=F_loss):
 
         scheduler.step()
         
-        loss = min_loss #TODO: remove this line
-        if (loss <= min_loss):
+        #loss = min_loss #TODO: remove this line
+        loss = val_logs[-1]
+        if (loss >= min_loss):
             torch.save({
                     'validation_loss' : loss,
                     'model_state_dict': unet.state_dict(),
@@ -160,13 +161,15 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
 
         total_loss += loss
 
-        #update momentum model params
-        enc_params = zip(unet.parameters(), unet_m.parameters())
-        for q_parameters, k_parameters in enc_params:
-            k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
+        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+
+    #update momentum model params
+    enc_params = zip(unet.parameters(), unet_m.parameters())
+    for q_parameters, k_parameters in enc_params:
+        k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
        
 
-        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+        
     
 
 def momentum_train(vgg, unet):
@@ -217,7 +220,7 @@ if __name__ == "__main__":
     serial = str(len(os.listdir("./logs")))
 
 
-    #torch.autograd.set_detect_anomaly(True)
+    
     print(device)
     vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
