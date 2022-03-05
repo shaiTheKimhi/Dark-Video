@@ -101,6 +101,7 @@ def create_dataset(dir_path = "../", train_ratio = 0.5, RGB=True, crop_size = 51
     test_ids = [i.replace('\n','') for i in test_ids]
     train_ids = [i.replace('\n','') for i in train_ids]
 
+
     #POSSIBLE: add validation set as well
 
     return VideDataset(dir_path, train_ids, crop_size=crop_size, downsampling_ratio=dr),\

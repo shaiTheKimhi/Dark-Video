@@ -32,9 +32,10 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
         torch.cuda.empty_cache()
         train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs, lam))
 
-        if epoch % 5 == 0:
+        if epoch % 1 == 0:
             torch.cuda.empty_cache()
             val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+            print(f"epoch:{epoch}:psnr:{val_logs[-1]}")
 
         #torch.cuda.empty_cache()
         #val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
@@ -46,10 +47,13 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
         psnr = val_logs[-1]
         if (psnr >= max_psnr):
             torch.save({
-                    'validation_loss' : max_psnr,
-                    'model_state_dict': unet.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    }, './checkpoint.pt')
+            'epoch': epoch,
+            'model_state_dict': unet.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'psnr': psnr,
+            'loss': train_logs[-1],
+            },  './checkpoint.pt')
+           
             max_psnr = psnr
 
     return train_logs, val_logs
@@ -79,7 +83,7 @@ def valid_epoch(vgg, unet, test_dl, loss_func, epoch, epochs, optimizer):
        
         bar.set_description(f'Validation:[{epoch+1}/{epochs}] psnr:{total_psnr/ total_samples}', refresh=True) 
     
-    return total_psnr
+    return total_psnr.to('cpu')
 
 def eval(model, im1, im2,  loss_func):
     res1 = model(im1)
@@ -123,11 +127,11 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
         #total_loss += loss
 
         bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+    
+    return total_loss.to('cpu')
 
 def psnr(im1, im2):
     #return torch.mean((im1 - im2) ** 2)
-    if (torch.mean((im1 - im2) ** 2) < 1e-3): 
-        return 1000
     return 20 * torch.log10(im1.max() / (torch.sqrt(torch.mean((im1 - im2) ** 2))))
 
 
@@ -174,7 +178,7 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
     for q_parameters, k_parameters in enc_params:
         k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
        
-
+    return total_loss.to('cpu')
         
     
 
@@ -229,19 +233,19 @@ if __name__ == "__main__":
     serial = str(len(os.listdir("./logs")))
 
     print(device)
-    vgg = Vgg19().to(device)
-    unet =  ResUnet().to(device)
-    logs = train_eval(vgg, unet)
+    #vgg = Vgg19().to(device)
+    #unet =  ResUnet().to(device)
+    #logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
-    logs = momentum_train(vgg, unet)
+    #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
-    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+    #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
     fcn_net = Fcn_resent50().to(device)
-    logs = train_eval(vgg, fcn_net)
+    #logs = train_eval(vgg, fcn_net)
     logs = train_eval(nn.Identity(), fcn_net, compute_error)
 
     file = open(f"logs/reg{serial}.txt","w")
