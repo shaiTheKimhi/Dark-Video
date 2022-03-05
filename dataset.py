@@ -89,7 +89,7 @@ def get_statistics(dir_path = "../", RGB=True):
     return [torch.mean(marr.T[i]) for i in range(NUM_CHANNELS)], [torch.mean(stdarr.T[i]) for i in range(NUM_CHANNELS)],\
     [torch.mean(gtmarr.T[i]) for i in range(NUM_CHANNELS)], [torch.mean(gtstdarr.T[i]) for i in range(NUM_CHANNELS)]
 
-def create_dataset(dir_path = "../", train_ratio = 0.5, RGB=True):
+def create_dataset(dir_path = "../", train_ratio = 0.5, RGB=True, crop_size = 512, dr=1):
     if not RGB:
         pass #here we will use the RAW dataset
     with open(os.path.join(dir_path, "test_list.txt"), "r") as file:
@@ -103,7 +103,8 @@ def create_dataset(dir_path = "../", train_ratio = 0.5, RGB=True):
 
     #POSSIBLE: add validation set as well
 
-    return VideDataset(dir_path, train_ids), VideDataset(dir_path, test_ids)
+    return VideDataset(dir_path, train_ids, crop_size=crop_size, downsampling_ratio=dr),\
+         VideDataset(dir_path, test_ids, crop_size=crop_size, downsampling_ratio= dr)
 
 
 
