@@ -8,7 +8,7 @@ import os
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def train_eval(vgg, unet, loss_f=F_loss):
+def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
     epochs = 100
     lr = 1e-3
     wd = 1e-4
@@ -25,26 +25,32 @@ def train_eval(vgg, unet, loss_f=F_loss):
 
     optimizer = torch.optim.Adam(unet.parameters(), lr=lr, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs, eta_min=0, verbose=True)
-    min_loss = float('inf')
+    max_psnr = -float('inf')
 
 
     for epoch in range(epochs):
-        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs))
+        torch.cuda.empty_cache()
+        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs, lam))
 
-        #loss = valid_epoch(model, test_dl, loss_f, epoch, epochs, None)
-        val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+        if epoch % 5 == 0:
+            torch.cuda.empty_cache()
+            val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+
+        #torch.cuda.empty_cache()
+        #val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+        
 
         scheduler.step()
         
         #loss = min_loss #TODO: remove this line
-        loss = val_logs[-1]
-        if (loss >= min_loss):
+        psnr = val_logs[-1]
+        if (psnr >= max_psnr):
             torch.save({
-                    'validation_loss' : loss,
+                    'validation_loss' : max_psnr,
                     'model_state_dict': unet.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     }, './checkpoint.pt')
-            min_loss = loss
+            max_psnr = psnr
 
     return train_logs, val_logs
             
@@ -54,11 +60,11 @@ def train_eval(vgg, unet, loss_f=F_loss):
 '''
 Returns the validation loss for each epoch (no accuracy measure, but can add PSNR measure)
 '''
-def valid_epoch(vgg, unet, train_dl, loss_func, epoch, epochs, optimizer):
+def valid_epoch(vgg, unet, test_dl, loss_func, epoch, epochs, optimizer):
     total_loss = 0
     total_psnr = 0
     total_samples = 0
-    bar = tqdm.tqdm(train_dl)
+    bar = tqdm.tqdm(test_dl)
     for x1, x2, gt in bar:
         torch.cuda.empty_cache()
         unet.train()
@@ -81,7 +87,7 @@ def eval(model, im1, im2,  loss_func):
     loss = loss_func(res1, res2)
     return loss
 
-def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam=0.05):
+def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
     total_loss = 0
     total_samples = 0
     bar = tqdm.tqdm(train_dl)
@@ -99,7 +105,7 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam=0.
         t1 = vgg(y1)
         t2 = vgg(y2)
         t3 = vgg(gt)
-        loss = loss_func(t1, t3) + loss_func(t2, t3) + lam * loss_func(t1, t2)
+        loss = loss_func(t3, t1) + loss_func(t3, t2) + lam * loss_func(t1, t2)
         loss.backward()
         optimizer.step()
 
@@ -155,7 +161,7 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
         t1 = vgg(y1)
         t2 = vgg(y2)
         t3 = vgg(gt)
-        loss = loss_func(t1, t3) + loss_func(t2, t3) + loss_func(t1, t2)
+        loss = loss_func(t3, t1) + loss_func(t3, t2) + loss_func(t1, t2)
         loss.backward()
         optimizer.step()
 
@@ -216,25 +222,27 @@ def momentum_train(vgg, unet):
 
     return train_logs, val_logs
 
+
+
 if __name__ == "__main__":
+    os.chdir("/home/shai.kimhi/advancedDeep/DIP/code/")
     serial = str(len(os.listdir("./logs")))
 
-
-    
     print(device)
     vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
-    #logs = train_eval(vgg, unet)
+    logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
-    #logs = momentum_train(vgg, unet)
+    logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
     logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
-    #fcn_net = fcn_resent50()
-    #logs = train_eval(vgg, fcn_net)
+    fcn_net = Fcn_resent50().to(device)
+    logs = train_eval(vgg, fcn_net)
+    logs = train_eval(nn.Identity(), fcn_net, compute_error)
 
     file = open(f"logs/reg{serial}.txt","w")
     file.write(dumps(logs))

@@ -1,4 +1,5 @@
 from audioop import add
+#from turtle import forward
 import torch
 import torch.nn as nn
 import torchvision
@@ -112,17 +113,34 @@ class ResUnet(nn.Module):
         x10 = self.block10(x9)
         return x10
 
+class Fcn_resent50(nn.Module):
+    def __init__(self, pre_trained = True, num_no_grad = 4) -> None:
+        super(Fcn_resent50, self).__init__()
+        model = torchvision.models.segmentation.fcn_resnet50(pretrained=pre_trained)
+        layers = list(model.backbone)[::-2] # total number of layers is 8
+        #turn off gradient for several first layers
+        for layer in layers:
+            for param in model.backbone[layer].parameters():
+                param.require_grad = False
+        
+        self.model = model
+        self.fc_head = nn.Conv2d(21, 3, (1,1), stride=(1,1), padding=(0,0), bias=True) #can switch off bias
 
-def fcn_resent50(pre_trained=True, num_no_grad = 4):
-    '''
-    Returns a model of FCN resnet 50 (optionally pretrained on COCO)
-    num_no_grad: number of blocks that for which gradient is turned off
-    '''
-    model = torchvision.models.segmentation.fcn_resnet50(pretrained=pre_trained)
-    layers = list(model.backbone) # total number of layers is 8
-    #turn off gradient for several first layers
-    for layer in layers:
-        for param in layer.paramters():
-            param.require_grad = False
+    def forward(self, X):
+        return self.fc_head(self.model(X)['out'])
 
-    return model
+
+
+# def fcn_resent50(pre_trained=True, num_no_grad = 4):
+#     '''
+#     Returns a model of FCN resnet 50 (optionally pretrained on COCO)
+#     num_no_grad: number of blocks that for which gradient is turned off
+#     '''
+#     model = torchvision.models.segmentation.fcn_resnet50(pretrained=pre_trained)
+#     layers = list(model.backbone)[::-2] # total number of layers is 8
+#     #turn off gradient for several first layers
+#     for layer in layers:
+#         for param in model.backbone[layer].parameters():
+#             param.require_grad = False
+
+#     return model
