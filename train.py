@@ -242,7 +242,7 @@ if __name__ == "__main__":
     print(device)
     #vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
-    logs = train_eval(vgg, unet)
+    #logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
     #logs = momentum_train(vgg, unet)
