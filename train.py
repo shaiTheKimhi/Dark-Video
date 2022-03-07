@@ -10,7 +10,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
     epochs = 100
-    lr = 1e-3
+    lr = 1e-4
     wd = 1e-4
     bs = 2 #batch size
 
@@ -30,12 +30,13 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
 
     for epoch in range(epochs):
         torch.cuda.empty_cache()
-        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs, lam))
+        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs, lam).clone().detach().to('cpu'))
 
-        if epoch % 1 == 0:
-            torch.cuda.empty_cache()
-            val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
-            print(f"epoch:{epoch}:psnr:{val_logs[-1]}")
+       
+        torch.cuda.empty_cache()
+        t = valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None)
+        val_logs.append(t.clone().detach().to('cpu'))
+        
 
         #torch.cuda.empty_cache()
         #val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
@@ -83,7 +84,7 @@ def valid_epoch(vgg, unet, test_dl, loss_func, epoch, epochs, optimizer):
        
         bar.set_description(f'Validation:[{epoch+1}/{epochs}] psnr:{total_psnr/ total_samples}', refresh=True) 
     
-    return total_psnr.to('cpu')
+    return (total_psnr/ total_samples).to('cpu')
 
 def eval(model, im1, im2,  loss_func):
     res1 = model(im1)
@@ -131,8 +132,11 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
     return total_loss.to('cpu')
 
 def psnr(im1, im2):
-    #return torch.mean((im1 - im2) ** 2)
-    return 20 * torch.log10(im1.max() / (torch.sqrt(torch.mean((im1 - im2) ** 2))))
+   #max is to be changed
+    max = torch.max(im1.max(), im2.max())
+    if max < 0:
+        max = torch.max(im1.abs().max(), im2.abs().max())
+    return 20 * torch.log10(max / (torch.sqrt(torch.mean((im1 - im2) ** 2))))
 
 
 def optimize(model, im1, im2, optimizer, loss_func):
@@ -147,7 +151,7 @@ def optimize(model, im1, im2, optimizer, loss_func):
     return loss
 
 
-def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epochs, m):
+def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epochs, m, lam):
     total_loss = 0
     total_samples = 0
     bar = tqdm.tqdm(train_dl)
@@ -165,7 +169,7 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
         t1 = vgg(y1)
         t2 = vgg(y2)
         t3 = vgg(gt)
-        loss = loss_func(t3, t1) + loss_func(t3, t2) + loss_func(t1, t2)
+        loss = loss_func(t3, t1) + loss_func(t3, t2) + lam * loss_func(t1, t2)
         loss.backward()
         optimizer.step()
 
@@ -178,13 +182,13 @@ def train_epoch_m(vgg, unet, unet_m, train_dl, optimizer, loss_func, epoch, epoc
     for q_parameters, k_parameters in enc_params:
         k_parameters.data = k_parameters.data * m + q_parameters.data * (1. - m)
        
-    return total_loss.to('cpu')
+    return (total_loss/total_samples).to('cpu')
         
     
 
-def momentum_train(vgg, unet):
+def momentum_train(vgg, unet, lam=0.05, loss_f=F_loss):
     epochs = 100
-    lr = 3e-3
+    lr = 1e-4
     wd = 1e-4
     bs = 2 #batch size
     momentum = 0.999
@@ -201,28 +205,31 @@ def momentum_train(vgg, unet):
 
     optimizer = torch.optim.Adam(unet.parameters(), lr=lr, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs, eta_min=0, verbose=True)
-    loss_f = F_loss
-    min_loss = float('inf')
+    max_psnr = -float('inf')
 
 
     train_logs = []
     val_logs = []
 
     for epoch in range(epochs):
-        train_epoch_m(vgg, unet, momentum_encoder, train_dl, optimizer, loss_f, epoch, epochs, momentum)
+        torch.cuda.empty_cache()
+        train_logs.append(train_epoch_m(vgg, unet, momentum_encoder, train_dl, optimizer, loss_f, epoch, epochs, momentum, lam).clone().detach().to('cpu'))
 
-        #val_logs.append(valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None))
+       
+        torch.cuda.empty_cache()
+        t = valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None)
+        val_logs.append(t.clone().detach().to('cpu'))
 
         scheduler.step()
         
-        loss = min_loss #TODO: remove this line
-        if (loss <= min_loss):
+       
+        if (val_logs[-1] >=  max_psnr):
             torch.save({
-                    'validation_loss' : loss,
+                    'psnr' : max_psnr,
                     'model_state_dict': unet.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),'epoch' : epoch, 
                     }, './checkpoint.pt')
-            min_loss = loss
+            max_psnr = val_logs[-1]
 
     return train_logs, val_logs
 
@@ -234,21 +241,23 @@ if __name__ == "__main__":
 
     print(device)
     #vgg = Vgg19().to(device)
-    #unet =  ResUnet().to(device)
-    #logs = train_eval(vgg, unet)
+    unet =  ResUnet().to(device)
+    logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
     #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
-    #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
-    fcn_net = Fcn_resent50().to(device)
+    #fcn_net = Fcn_resent50().to(device)
     #logs = train_eval(vgg, fcn_net)
-    logs = train_eval(nn.Identity(), fcn_net, compute_error)
+    #logs = train_eval(nn.Identity(), fcn_net, compute_error)
 
-    file = open(f"logs/reg{serial}.txt","w")
+    logs = torch.tensor(logs).tolist()
+
+    file = open(f"logs/naive{serial}.txt","w")
     file.write(dumps(logs))
     file.close()
 

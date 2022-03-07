@@ -117,7 +117,7 @@ class Fcn_resent50(nn.Module):
     def __init__(self, pre_trained = True, num_no_grad = 4) -> None:
         super(Fcn_resent50, self).__init__()
         model = torchvision.models.segmentation.fcn_resnet50(pretrained=pre_trained)
-        layers = list(model.backbone)[::] # total number of layers is 8
+        layers = list(model.backbone)[:-2] # total number of layers is 8
         #turn off gradient for several first layers
         for layer in layers:
             for param in model.backbone[layer].parameters():
