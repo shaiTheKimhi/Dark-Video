@@ -129,7 +129,7 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
 
         bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
     
-    return total_loss.to('cpu')
+    return (total_loss / total_samples).to('cpu')
 
 def psnr(im1, im2):
    #max is to be changed
@@ -240,15 +240,15 @@ if __name__ == "__main__":
     serial = str(len(os.listdir("./logs")))
 
     print(device)
-    #vgg = Vgg19().to(device)
+    vgg = Vgg19().to(device)
     unet =  ResUnet().to(device)
-    #logs = train_eval(vgg, unet)
+    logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
     #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
-    logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
+    #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
     #fcn_net = Fcn_resent50().to(device)
