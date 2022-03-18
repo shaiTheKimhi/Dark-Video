@@ -38,14 +38,14 @@ def eval_model(model, dl, name="regular"):
 
 caller_count = 0
 caller_images = None
-def get_images(model, dl, name):
+def get_images(model, dl, name, index=0):
     global caller_count
     global caller_images
     name = name.split(".pt")[0]
 
 
     if caller_count == 0:
-        x1, _, y = [i for i in dl][6]
+        x1, _, y = [i for i in dl][index]
         caller_images = (x1, y)
 
         plt.imshow(x1[0].permute(1,2,0))
