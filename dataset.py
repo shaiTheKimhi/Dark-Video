@@ -6,7 +6,6 @@ import torchvision
 from torchvision import transforms
 import numpy as np
 import random
-import rawpy
 
 import tqdm
 
@@ -89,7 +88,7 @@ def get_statistics(dir_path = "../", RGB=True):
     return [torch.mean(marr.T[i]) for i in range(NUM_CHANNELS)], [torch.mean(stdarr.T[i]) for i in range(NUM_CHANNELS)],\
     [torch.mean(gtmarr.T[i]) for i in range(NUM_CHANNELS)], [torch.mean(gtstdarr.T[i]) for i in range(NUM_CHANNELS)]
 
-def create_dataset(dir_path = "../", train_ratio = 0.5, RGB=True, crop_size = 512, dr=1):
+def create_dataset(dir_path = "../", RGB=True, crop_size = 512, dr=1):
     if not RGB:
         pass #here we will use the RAW dataset
     with open(os.path.join(dir_path, "test_list.txt"), "r") as file:

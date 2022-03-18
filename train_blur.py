@@ -3,6 +3,7 @@ import torch.nn as nn
 from model import *
 from tqdm import tqdm
 from dataset import *
+from dataset_blur import * 
 from json import dumps
 import os
 
@@ -17,9 +18,15 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
     train_logs = []
     val_logs = []
 
-    train_ds, test_ds = create_dataset() #path is already default
-    train_dl = torch.utils.data.DataLoader(train_ds,batch_size=bs, shuffle=True)
-    test_dl = torch.utils.data.DataLoader(test_ds,batch_size=1, shuffle=True)
+    ratio = 0.7
+
+    train_ds, train_ds_list = getDataset('train')
+    test_ds, test_ds_list =  getDataset('test')
+    
+
+    # train_ds, test_ds = create_dataset(train_ratio=ratio) #path is already default
+    # train_dl = torch.utils.data.DataLoader(train_ds,batch_size=bs, shuffle=True)
+    # test_dl = torch.utils.data.DataLoader(test_ds,batch_size=1, shuffle=True)
 
     optimizer = torch.optim.Adam(unet.parameters(), lr=lr, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs, eta_min=0, verbose=True)
@@ -28,11 +35,11 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
 
     for epoch in range(epochs):
         torch.cuda.empty_cache()
-        train_logs.append(train_epoch(vgg, unet, train_dl, optimizer, loss_f, epoch, epochs, lam).clone().detach().to('cpu'))
+        train_logs.append(train_epoch(vgg, unet, train_ds, optimizer, loss_f, epoch, epochs, lam).clone().detach().to('cpu'))
 
        
         torch.cuda.empty_cache()
-        t = valid_epoch(vgg, unet, test_dl, loss_f, epoch, epochs, None)
+        t = valid_epoch(vgg, unet, test_ds, loss_f, epoch, epochs, None)
         val_logs.append(t.clone().detach().to('cpu'))
         
 
@@ -63,19 +70,19 @@ def train_eval(vgg, unet, loss_f=F_loss, lam=0.05):
 '''
 Returns the validation loss for each epoch (no accuracy measure, but can add PSNR measure)
 '''
-def valid_epoch(vgg, unet, test_dl, loss_func, epoch, epochs, optimizer):
+def valid_epoch(vgg, unet, test_ds, loss_func, epoch, epochs, optimizer):
     total_loss = 0
     total_psnr = 0
     total_samples = 0
-    bar = tqdm.tqdm(test_dl)
-    for x1, x2, gt in bar:
+
+    for blur, gt in test_ds:
         torch.cuda.empty_cache()
         unet.train()
-        x1, gt = x1.to(device), gt.to(device)
-        n = x1.shape[0]
+        blur, gt = blur.to(device), gt.to(device)
+        n = blur.shape[0]
         total_samples += n
 
-        y1 = unet(x1)
+        y1 = unet(blur)
         total_loss += optimize(vgg, y1, gt, optimizer, loss_func)
         total_psnr += psnr(y1, gt)
         # Add evaluation for PSNR and FSNR and return these values
@@ -90,18 +97,18 @@ def eval(model, im1, im2,  loss_func):
     loss = loss_func(res1, res2)
     return loss
 
-def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
+def train_epoch(vgg, unet, train_ds, optimizer, loss_func, epoch, epochs, lam):
     total_loss = 0
     total_samples = 0
-    bar = tqdm.tqdm(train_dl)
-    for x1, x2, gt in bar:
+    for x1, x2, gt in train_ds:
         torch.cuda.empty_cache()
         unet.train()
         optimizer.zero_grad()
         x1, x2, gt = x1.to(device), x2.to(device), gt.to(device)
         n = x1.shape[0]
         total_samples += n
-
+        
+        
         y1 = unet(x1)
         y2 = unet(x2)
 
@@ -125,7 +132,7 @@ def train_epoch(vgg, unet, train_dl, optimizer, loss_func, epoch, epochs, lam):
 
         #total_loss += loss
 
-        bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
+        # bar.set_description(f'TEpoch:[{epoch+1}/{epochs}] loss:{total_loss/ total_samples}', refresh=True) 
     
     return (total_loss / total_samples).to('cpu')
 
@@ -195,8 +202,9 @@ def momentum_train(vgg, unet, lam=0.05, loss_f=F_loss):
     for params in momentum_encoder.parameters(): #Momentum model does not require gradient
         params.requires_grad = False
 
-   
-    train_ds, test_ds = create_dataset() #path is already default
+    ratio = 0.7
+
+    train_ds, test_ds = create_dataset(train_ratio=ratio) #path is already default
     train_dl = torch.utils.data.DataLoader(train_ds,batch_size=bs, shuffle=True)
     test_dl = torch.utils.data.DataLoader(test_ds,batch_size=1, shuffle=True)
 
@@ -233,28 +241,27 @@ def momentum_train(vgg, unet, lam=0.05, loss_f=F_loss):
 
 
 if __name__ == "__main__":
-    os.chdir("/home/shai.kimhi/advancedDeep/DIP/code/")
     serial = str(len(os.listdir("./logs")))
 
     print(device)
     vgg = Vgg19().to(device)
-    #unet =  ResUnet().to(device)
-    #logs = train_eval(vgg, unet, lam=0.2)
+    unet =  ResUnet().to(device)
+    logs = train_eval(vgg, unet)
 
     #train with momentum method (add logs save)
-    #logs = momentum_train(vgg, unet, lam=0.2)
+    #logs = momentum_train(vgg, unet)
 
     #train without special loss (add logs save)
     #logs = train_eval(nn.Identity(), unet, compute_error) #compute error is MSE difference between two images
 
     #train with transfer learning from COCO (add logs save)
-    fcn_net = Fcn_resent50().to(device)
-    logs = train_eval(vgg, fcn_net)
+    #fcn_net = Fcn_resent50().to(device)
+    #logs = train_eval(vgg, fcn_net)
     #logs = train_eval(nn.Identity(), fcn_net, compute_error)
 
     logs = torch.tensor(logs).tolist()
 
-    file = open(f"logs/transfer-2-l0.2-{serial}.txt","w")
+    file = open(f"logs/naive{serial}.txt","w")
     file.write(dumps(logs))
     file.close()
 
